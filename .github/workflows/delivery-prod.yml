@@ -1,0 +1,63 @@
+name: Delivery to PROD
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v5.5
+        with:
+          github_token: ${{ secrets.TOKEN }}
+      - name: Create a GitHub release
+        uses: actions/create-release@v1
+        env:
+
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          release_name: ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: argo-hello-world
+          IMAGE_TAG: ${{ steps.tag_version.outputs.new_tag }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Change deployment.yaml with release version}
+        env:
+          IMAGE_TAG: ${{ steps.tag_version.outputs.new_tag }}
+        run: |
+          IMAGE_TAG=$IMAGE_TAG
+          sed -i "/$AWS-ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/s|/[^;]\+|\/argo-hello-world:$IMAGE_TAG|" k8s/prod/argo-hello-world.yaml
+      - name: Commit files # transfer the new html files back into the repository
+        env:
+          IMAGE_TAG: ${{ steps.tag_version.outputs.new_tag }}
+        run: |
+          git config --local user.name "Git Action Runner"
+          git add .
+          git commit -m "Update image version in deployment.yaml: $IMAGE_TAG "
+      - name: Push changes # push the output folder to your repo
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          force: true

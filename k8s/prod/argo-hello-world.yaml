@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: argo-hello-world
+spec:
+  selector:
+    matchLabels:
+      app: argo-hello-world
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: argo-hello-world
+    spec:
+      containers:
+        - name: argo-hello-world
+          image: $AWS-ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/argo-hello-world:v0.0.9
+          env:
+            name: SECRET
+            valueFrom:
+              secretKeyRef:
+                key: secret
+                name: secret
+          ports:
+            - containerPort: 9290
+          livenessProbe:
+            httpGet:
+              path: /health-check
+              port: 9290
+            initialDelaySeconds: 1
+            timeoutSeconds: 2
+            periodSeconds: 5
+  strategy:
+    blueGreen:
+      activeService: argo-hello-world-active
+      previewService: argo-hello-world-preview
+      autoPromotionEnabled: true
+      autoPromotionSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-hello-world-active
+  labels:
+    app: argo-hello-world
+spec:
+  ports:
+    - port: 80
+      targetPort: 9290
+  selector:
+    app: argo-hello-world
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-hello-world-preview
+  labels:
+    app: argo-hello-world
+spec:
+  ports:
+    - port: 80
+      targetPort: 9290
+  selector:
+    app: argo-hello-world
